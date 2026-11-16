@@ -1,0 +1,121 @@
+name: Build Qt
+
+# Push a tag named v<qt version>-<revision> (e.g. v6.12.0-1) to build every
+# platform and publish a GitHub release with the installers attached.
+# Manual runs build everything and keep the installers as workflow artifacts.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-24.04
+    outputs:
+      qt_version: ${{ steps.version.outputs.qt_version }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Shellcheck
+        run: shellcheck -x -P SCRIPTDIR config.sh scripts/*.sh packaging/*.sh
+      - name: Read Qt version
+        id: version
+        run: |
+          source config.sh
+          echo "qt_version=$QT_VERSION" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            case "$GITHUB_REF_NAME" in
+              "v$QT_VERSION"|"v$QT_VERSION"-*) ;;
+              *) echo "::error::Tag $GITHUB_REF_NAME does not match QT_VERSION=$QT_VERSION in config.sh (expected v$QT_VERSION-<n>)"; exit 1 ;;
+            esac
+          fi
+      - name: Verify source hashes
+        run: |
+          # Every archive in sources.sha256 must still be downloadable and
+          # match; this fails fast before hours of building.
+          WORK_DIR="$RUNNER_TEMP/out" ./scripts/fetch-sources.sh
+
+  build:
+    name: ${{ matrix.id }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - id: linux-x86_64
+            runner: ubuntu-24.04
+            kind: linux
+          - id: linux-arm64
+            runner: ubuntu-24.04-arm
+            kind: linux
+          - id: macos-universal
+            runner: macos-15
+            kind: macos
+    uses: ./.github/workflows/build-platform.yml
+    with:
+      id: ${{ matrix.id }}
+      runner: ${{ matrix.runner }}
+      kind: ${{ matrix.kind }}
+
+  release:
+    name: Release
+    needs: [check, build]
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: qt-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: |
+          cd dist
+          rm -f ./*.sha256
+          sha256sum ./*.run | sed 's| \./| |' > SHA256SUMS
+          cat SHA256SUMS
+      - uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: dist/*.run
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QT_VERSION: ${{ needs.check.outputs.qt_version }}
+        run: |
+          source config.sh
+          cat > notes.md <<NOTES
+          Open source Qt $QT_VERSION built from the official source archives by
+          [this workflow run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID).
+
+          | Package | Platform |
+          |---|---|
+          | \`qt-$QT_VERSION-$DIST_NAME-linux-x86_64.run\` | Linux x86_64 (glibc >= 2.34) |
+          | \`qt-$QT_VERSION-$DIST_NAME-linux-arm64.run\` | Linux arm64 (glibc >= 2.34) |
+          | \`qt-$QT_VERSION-$DIST_NAME-macos-universal.run\` | macOS universal (arm64 + x86_64) |
+
+          Modules: $(echo "${QT_MODULES[@]}" | sed 's/:linux/ (Linux)/g; s/:macos/ (macOS)/g')
+          Linux packages also include ICU $ICU_VERSION and patchelf $PATCHELF_VERSION.
+
+          Install interactively with \`./qt-<...>.run\`, or non-interactively with
+          \`./qt-<...>.run -- <dir> --yes\` (installs to \`<dir>/$QT_VERSION/<build>\`).
+
+          Verify provenance: \`gh attestation verify qt-<...>.run --repo $GITHUB_REPOSITORY\`
+          NOTES
+          sed -i 's/^          //' notes.md
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* --title "Qt $QT_VERSION ($GITHUB_REF_NAME)" --notes-file notes.md
+          fi

@@ -1,0 +1,103 @@
+# Builds Qt for one platform, split over several sequential jobs so each one
+# stays well under the 6 hour limit of GitHub-hosted runners.  The Qt
+# installation is handed from one job to the next as an artifact.
+name: Build platform
+
+on:
+  workflow_call:
+    inputs:
+      id:
+        description: Platform id, e.g. linux-x86_64
+        required: true
+        type: string
+      runner:
+        required: true
+        type: string
+      kind:
+        description: linux or macos
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  CI_KIND: ${{ inputs.kind }}
+
+jobs:
+  qtbase:
+    name: deps + qtbase
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/prepare
+        with:
+          kind: ${{ inputs.kind }}
+      - name: Fetch and verify sources
+        run: ./scripts/ci-run.sh ./scripts/fetch-sources.sh
+      - name: Build dependencies
+        run: ./scripts/ci-run.sh ./scripts/build-deps.sh
+      - name: Build qtbase
+        run: ./scripts/ci-run.sh ./scripts/build-qt.sh --until qtbase
+      - uses: ./.github/actions/save-state
+        with:
+          name: state-${{ inputs.id }}-1
+
+  modules:
+    name: shadertools, svg, imageformats
+    needs: qtbase
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/prepare
+        with:
+          kind: ${{ inputs.kind }}
+          restore: state-${{ inputs.id }}-1
+      - name: Build modules
+        run: ./scripts/ci-run.sh ./scripts/build-qt.sh --resume --until qtimageformats
+      - uses: ./.github/actions/save-state
+        with:
+          name: state-${{ inputs.id }}-2
+
+  declarative:
+    name: qtdeclarative
+    needs: modules
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/prepare
+        with:
+          kind: ${{ inputs.kind }}
+          restore: state-${{ inputs.id }}-2
+      - name: Build qtdeclarative
+        run: ./scripts/ci-run.sh ./scripts/build-qt.sh --resume --until qtdeclarative
+      - uses: ./.github/actions/save-state
+        with:
+          name: state-${{ inputs.id }}-3
+
+  package:
+    name: remaining modules + package
+    needs: declarative
+    runs-on: ${{ inputs.runner }}
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/prepare
+        with:
+          kind: ${{ inputs.kind }}
+          restore: state-${{ inputs.id }}-3
+      - name: Build remaining modules
+        run: ./scripts/ci-run.sh ./scripts/build-qt.sh --resume
+      - name: Finalize
+        run: ./scripts/ci-run.sh ./scripts/finalize.sh
+      - name: Package
+        run: ./scripts/ci-run.sh ./scripts/package.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: qt-${{ inputs.id }}
+          path: out/artifacts/*
+          compression-level: 0
+          if-no-files-found: error

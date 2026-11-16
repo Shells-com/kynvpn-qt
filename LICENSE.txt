@@ -1,0 +1,34 @@
+LICENSE INFORMATION
+===================
+
+The build scripts in this repository are licensed under the GNU General
+Public License, version 3 or (at your option) any later version. The full
+text is in COPYING.
+
+Portions of this repository (notably packaging/install.sh,
+packaging/extract.sh and the build logic in scripts/) are derived from
+https://github.com/pia-foss/desktop-dep-build:
+
+  Copyright (c) 2022 Private Internet Access, Inc.
+
+  The Private Internet Access Desktop Client is free software: you can
+  redistribute it and/or modify it under the terms of the GNU General Public
+  License as published by the Free Software Foundation, either version 3 of
+  the License, or (at your option) any later version.
+
+Third-party components
+----------------------
+
+third_party/makeself/  makeself (https://makeself.io/), GPLv2 or later,
+                       see third_party/makeself/COPYING.
+
+Software built by this repository and shipped in the release packages:
+
+  Qt        https://www.qt.io/              LGPLv3 / GPLv2 / GPLv3 (open source
+                                            edition, see the licenses shipped
+                                            with each Qt module)
+  ICU       https://icu.unicode.org/        Unicode License v3 (Linux only)
+  patchelf  https://github.com/NixOS/patchelf  GPLv3 (Linux only)
+
+OpenSSL (Apache-2.0) headers are used at build time only; Qt loads OpenSSL
+at runtime and no OpenSSL binaries are shipped in the packages.
