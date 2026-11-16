@@ -37,10 +37,19 @@ runs:
         sudo rm -rf ~/Library/Android /Library/Developer/CoreSimulator/Profiles/Runtimes || true
         df -h /
 
+    # The builder image is built once, in the first stage, and handed to the
+    # later stages with the build state so the whole build uses exactly the
+    # same toolchain and libraries.
     - name: Build container image (Linux)
-      if: inputs.kind == 'linux'
+      if: inputs.kind == 'linux' && inputs.restore == ''
       shell: bash
-      run: docker build -t qt-builder -f docker/linux-builder.Dockerfile .
+      run: |
+        for attempt in 1 2 3; do
+          docker build --pull -t qt-builder -f docker/linux-builder.Dockerfile . && exit 0
+          echo "::warning::docker build failed (attempt $attempt), retrying in 60s"
+          sleep 60
+        done
+        exit 1
 
     - name: Install build tools (macOS)
       if: inputs.kind == 'macos'
@@ -67,5 +76,8 @@ runs:
       shell: bash
       run: |
         zstd -dc "$RUNNER_TEMP/state/state.tar.zst" | tar -xf -
+        if [ "${{ inputs.kind }}" = linux ]; then
+          zstd -dc "$RUNNER_TEMP/state/builder-image.tar.zst" | docker load
+        fi
         rm -rf "$RUNNER_TEMP/state"
         ls out/install/*/*/share/qt-build-info/

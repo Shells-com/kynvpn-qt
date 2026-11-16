@@ -1,8 +1,11 @@
 name: Save build state
-description: Archive the Qt installation and dependency prefix for the next stage.
+description: Archive the Qt installation, dependency prefix and (on Linux) the builder image for the next stage.
 inputs:
   name:
     description: Artifact name
+    required: true
+  kind:
+    description: linux or macos
     required: true
 runs:
   using: composite
@@ -10,12 +13,16 @@ runs:
     - name: Archive state
       shell: bash
       run: |
-        tar -cf - out/install out/deps | zstd -T0 -3 -o "$RUNNER_TEMP/state.tar.zst"
-        ls -lh "$RUNNER_TEMP/state.tar.zst"
+        mkdir -p "$RUNNER_TEMP/save"
+        tar -cf - out/install out/deps | zstd -T0 -3 -o "$RUNNER_TEMP/save/state.tar.zst"
+        if [ "${{ inputs.kind }}" = linux ]; then
+          docker save qt-builder | zstd -T0 -3 -o "$RUNNER_TEMP/save/builder-image.tar.zst"
+        fi
+        ls -lh "$RUNNER_TEMP/save"
     - uses: actions/upload-artifact@v7
       with:
         name: ${{ inputs.name }}
-        path: ${{ runner.temp }}/state.tar.zst
+        path: ${{ runner.temp }}/save/
         retention-days: 3
         compression-level: 0
         if-no-files-found: error

@@ -9,9 +9,12 @@
 # too old for Qt 6.12 (OpenSSL 1.1, glibc below Qt's baseline).
 FROM almalinux:9
 
-RUN dnf -y install dnf-plugins-core epel-release \
+# Mirrors can lag right after an AlmaLinux point release: retry downloads and
+# always refresh the metadata.
+RUN echo -e 'retries=10\nskip_if_unavailable=False' >> /etc/dnf/dnf.conf \
+ && dnf -y --refresh install dnf-plugins-core epel-release \
  && dnf config-manager --set-enabled crb \
- && dnf -y install \
+ && dnf -y --refresh install \
       clang gcc-c++ make patch perl python3 python3-pip \
       git xz file which findutils tar gzip diffutils \
       fontconfig-devel freetype-devel glib2-devel dbus-devel at-spi2-core-devel \
