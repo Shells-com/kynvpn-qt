@@ -17,12 +17,15 @@ mkdir -p "$PKG_BUILD" "$ARTIFACTS_DIR"
 rm -f "$INSTALLER"
 
 log "Creating $ARCHIVE_NAME"
-if [ "$PLATFORM" = linux ]; then
+# makeself uses GNU tar when it can find one (e.g. Homebrew's gtar on macOS),
+# so pick the same tar here and use the owner options that tar understands.
+TAR="$(command -v gtar || command -v tar)"
+if "$TAR" --version 2>/dev/null | grep -q "GNU tar"; then
     TAR_OWNER=(--owner=0 --group=0 --numeric-owner --sort=name)
 else
     TAR_OWNER=(--uid 0 --gid 0 --numeric-owner)
 fi
-(cd "$QT_INSTALL_ROOT" && tar "${TAR_OWNER[@]}" -cf - .) | xz -T0 -6 > "$PKG_BUILD/$ARCHIVE_NAME"
+(cd "$QT_INSTALL_ROOT" && "$TAR" "${TAR_OWNER[@]}" -cf - .) | xz -T0 -6 > "$PKG_BUILD/$ARCHIVE_NAME"
 
 subst() {
     sed -e "s/{{QT_VERSION}}/$QT_VERSION/g" \
